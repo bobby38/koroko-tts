@@ -56,7 +56,6 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
   const [language, setLanguage] = useState('en');
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const speakerWavRef = useRef<HTMLInputElement>(null);
 
   const voices = model === 'xtts' ? XTTS_VOICES : KOKORO_VOICES;
 
@@ -113,8 +112,7 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
       };
 
       // Save audio data to IndexedDB
-      await saveAudio(id, new Uint8Array(audioData));
-
+      await saveAudio(historyItem);
       onSuccess(historyItem);
       formRef.current?.reset();
       setText('');

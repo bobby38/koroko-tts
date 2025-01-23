@@ -9,8 +9,11 @@ export interface TTSResponse {
 }
 
 export interface HistoryItem {
+  id: string;
   text: string;
   audioUrl: string;
+  model: string;
+  voice: string;
   createdAt: string;
 }
 
