@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import { join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
+import { KokoroVoice, TTSModel } from '@/types';
 
 const execAsync = promisify(exec);
 
@@ -16,13 +17,12 @@ const MODELS = {
   xtts: "lucataco/xtts-v2:684bc3855b37866c0c65add2ff39c78f3dea3f4ff103a436465326e0f438d55e"
 } as const;
 
-type XTTS_Speaker = keyof typeof XTTS_SPEAKERS;
-
 const XTTS_SPEAKERS = {
   male: "https://replicate.delivery/pbxt/Jt79w0xsT64R1JsiJ0LQRL8UcWspg5J4RFrU6YwEKpOT1ukS/male.wav",
   female: "https://replicate.delivery/pbxt/JqzxMWScZ4O44XwIwWveDoeAE2Ga7gYdnXKb8l18Fv7D3QEx/female.wav"
 } as const;
 
+type XTTS_Speaker = keyof typeof XTTS_SPEAKERS;
 const XTTS_SPEAKER_KEYS = Object.keys(XTTS_SPEAKERS) as XTTS_Speaker[];
 
 const KOKORO_VOICES = [
@@ -63,13 +63,47 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
   }
 }
 
+async function processWavFile(file: File): Promise<string> {
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const tempPath = join(tmpdir(), `speaker-${Date.now()}.wav`);
+    await writeFile(tempPath, buffer);
+    
+    // Create a data URL from the WAV file
+    const base64 = buffer.toString('base64');
+    const dataUrl = `data:audio/wav;base64,${base64}`;
+    
+    // Clean up temp file
+    await unlink(tempPath).catch(() => {});
+    
+    return dataUrl;
+  } catch (error) {
+    console.error('Error processing WAV file:', error);
+    throw new Error('Failed to process WAV file');
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { text, model = 'xtts', voice = 'af_bella', language = 'en' } = await request.json();
-    
+    const formData = await request.formData();
+    const text = formData.get('text') as string;
+    const model = formData.get('model') as TTSModel;
+    const voice = formData.get('voice') as string;
+    const language = formData.get('language') as string;
+    const speakerWav = formData.get('speaker_wav') as File | null;
+
+    // Validate required fields
+    if (!text?.trim()) {
+      return NextResponse.json({ error: 'Text is required' }, { status: 400 });
+    }
+
+    if (!model || !['kokoro', 'xtts'].includes(model)) {
+      return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
+    }
+
     // Validate model-specific parameters
     if (model === 'kokoro') {
-      if (!KOKORO_VOICES.includes(voice)) {
+      if (!voice || !KOKORO_VOICES.includes(voice as KokoroVoice)) {
         return NextResponse.json(
           { error: `Invalid voice for Kokoro model. Valid voices are: ${KOKORO_VOICES.join(', ')}` },
           { status: 400 }
@@ -78,25 +112,25 @@ export async function POST(request: NextRequest) {
     } else if (model === 'xtts') {
       const validLanguages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh', 'ja'];
       
-      if (!validLanguages.includes(language)) {
+      if (!language || !validLanguages.includes(language)) {
         return NextResponse.json(
           { error: `Invalid language for XTTS model. Valid languages are: ${validLanguages.join(', ')}` },
           { status: 400 }
         );
       }
 
-      if (!XTTS_SPEAKER_KEYS.includes(voice as XTTS_Speaker)) {
+      if (voice && !XTTS_SPEAKER_KEYS.includes(voice as XTTS_Speaker) && !speakerWav) {
         return NextResponse.json(
-          { error: `Invalid speaker for XTTS model. Valid speakers are: male, female` },
+          { error: 'Invalid speaker for XTTS model. Valid speakers are: male, female' },
           { status: 400 }
         );
       }
     }
 
-    if (!text) {
+    if (!process.env.REPLICATE_API_TOKEN) {
       return NextResponse.json(
-        { error: 'Text is required' },
-        { status: 400 }
+        { error: 'Replicate API token not configured' },
+        { status: 500 }
       );
     }
 
@@ -110,12 +144,20 @@ export async function POST(request: NextRequest) {
 
     if (model === 'xtts') {
       console.log('Using XTTS model with language:', language);
-      const speaker = XTTS_SPEAKERS[voice as keyof typeof XTTS_SPEAKERS] || XTTS_SPEAKERS.female;
+      
+      // Handle speaker selection
+      let speaker: string;
+      if (speakerWav) {
+        speaker = await processWavFile(speakerWav);
+      } else {
+        speaker = XTTS_SPEAKERS[voice as XTTS_Speaker] || XTTS_SPEAKERS.female;
+      }
+
       output = await replicate.run(MODELS.xtts, {
         input: {
           text: text.trim(),
           speaker,
-          language,
+          language: language || 'en',
           cleanup_voice: false
         }
       });
@@ -143,14 +185,33 @@ export async function POST(request: NextRequest) {
     const audioResponse = await fetch(output as string);
     if (!audioResponse.ok) {
       console.error('Failed to download audio:', audioResponse.statusText);
-      throw new Error(`Failed to download audio: ${audioResponse.statusText}`);
+      return NextResponse.json(
+        { error: `Failed to download audio: ${audioResponse.statusText}` },
+        { status: 500 }
+      );
     }
     
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
     console.log('Audio buffer size:', audioBuffer.length);
 
+    if (audioBuffer.length === 0) {
+      console.error('Empty audio buffer received');
+      return NextResponse.json(
+        { error: 'Received empty audio data' },
+        { status: 500 }
+      );
+    }
+
     const mp3Buffer = await convertToMp3(audioBuffer);
     console.log('MP3 buffer size:', mp3Buffer.length);
+
+    if (mp3Buffer.length === 0) {
+      console.error('Empty MP3 buffer after conversion');
+      return NextResponse.json(
+        { error: 'Failed to convert audio to MP3' },
+        { status: 500 }
+      );
+    }
 
     return new NextResponse(mp3Buffer, {
       headers: {
@@ -162,7 +223,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('TTS API Error:', error);
     return NextResponse.json(
-      { error: 'Failed to process TTS request' },
+      { error: error instanceof Error ? error.message : 'Failed to process TTS request' },
       { status: 500 }
     );
   }

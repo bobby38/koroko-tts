@@ -1,57 +1,121 @@
-import { HistoryItem } from '@/types';
+import type { HistoryItem } from '@/types';
+
+const DB_NAME = 'tts-history';
+const DB_VERSION = 1;
+const HISTORY_STORE = 'history';
+const AUDIO_STORE = 'audio';
+
+let db: IDBDatabase | null = null;
 
 // Initialize IndexedDB
-const initDB = async () => {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('kokoroTTS', 1);
+export async function initDB(): Promise<IDBDatabase> {
+  if (db) return db;
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      db = request.result;
+      resolve(request.result);
+    };
 
-    request.onupgradeneeded = (event) => {
+    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains('history')) {
-        db.createObjectStore('history', { keyPath: 'id' });
+      
+      // Create history store
+      if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+        db.createObjectStore(HISTORY_STORE, { keyPath: 'id' });
+      }
+      
+      // Create audio store
+      if (!db.objectStoreNames.contains(AUDIO_STORE)) {
+        db.createObjectStore(AUDIO_STORE, { keyPath: 'id' });
       }
     };
   });
-};
+}
 
 // Save audio data to IndexedDB
-export const saveAudio = async (item: HistoryItem): Promise<void> => {
+export async function saveAudio(item: HistoryItem, audioData: ArrayBuffer) {
+  const db = await initDB();
+  return new Promise<void>((resolve, reject) => {
+    try {
+      const transaction = db.transaction([HISTORY_STORE, AUDIO_STORE], 'readwrite');
+      
+      // Save history item
+      const historyStore = transaction.objectStore(HISTORY_STORE);
+      historyStore.put(item);
+      
+      // Save audio data
+      const audioStore = transaction.objectStore(AUDIO_STORE);
+      audioStore.put({
+        id: item.id,
+        audioData: audioData,
+        timestamp: Date.now()
+      });
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+// Get history item with audio data
+export async function getHistoryItem(id: string): Promise<{ audioData: ArrayBuffer } | null> {
   const db = await initDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['history'], 'readwrite');
-    const store = transaction.objectStore('history');
-    const request = store.put(item);
+    try {
+      const transaction = db.transaction(AUDIO_STORE, 'readonly');
+      const store = transaction.objectStore(AUDIO_STORE);
+      const request = store.get(id);
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (error) {
+      reject(error);
+    }
   });
-};
+}
 
 // Get all history items
-export const getAllHistory = async (): Promise<HistoryItem[]> => {
+export async function getAllHistory(): Promise<HistoryItem[]> {
   const db = await initDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['history'], 'readonly');
-    const store = transaction.objectStore('history');
-    const request = store.getAll();
+    try {
+      const transaction = db.transaction(HISTORY_STORE, 'readonly');
+      const store = transaction.objectStore(HISTORY_STORE);
+      const request = store.getAll();
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (error) {
+      reject(error);
+    }
   });
-};
+}
 
-// Delete a history item
-export const deleteHistoryItem = async (id: string): Promise<void> => {
+// Clear all history items
+export async function clearHistory() {
   const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['history'], 'readwrite');
-    const store = transaction.objectStore('history');
-    const request = store.delete(id);
+  return new Promise<void>((resolve, reject) => {
+    try {
+      const transaction = db.transaction([HISTORY_STORE, AUDIO_STORE], 'readwrite');
+      
+      // Clear history store
+      const historyStore = transaction.objectStore(HISTORY_STORE);
+      historyStore.clear();
+      
+      // Clear audio store
+      const audioStore = transaction.objectStore(AUDIO_STORE);
+      audioStore.clear();
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    } catch (error) {
+      reject(error);
+    }
   });
-};
+}

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { TrashIcon } from '@heroicons/react/24/outline';
-import { HistoryItem } from '@/types';
+import type { HistoryItem } from '@/types';
+import { getHistoryItem } from '@/utils/db';
 
 interface Props {
   items: HistoryItem[];
@@ -17,22 +18,99 @@ const formatDate = (dateString: string) => {
   }
 };
 
+const AudioPlayer = React.memo(({ item }: { item: HistoryItem }) => {
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  // Load audio data when component mounts
+  useEffect(() => {
+    const loadAudio = async () => {
+      try {
+        setIsLoading(true);
+        const result = await getHistoryItem(item.id);
+        if (result?.audioData) {
+          const blob = new Blob([result.audioData], { type: 'audio/mpeg' });
+          const url = URL.createObjectURL(blob);
+          setAudioUrl(url);
+        }
+      } catch (err) {
+        console.error('Error loading audio:', err);
+        setError('Failed to load audio');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadAudio();
+
+    // Cleanup function
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+  }, [item.id]);
+
+  const handlePlay = useCallback(() => {
+    if (audioRef.current && audioUrl) {
+      audioRef.current.play().catch(err => {
+        console.error('Error playing audio:', err);
+        setError('Failed to play audio');
+      });
+    }
+  }, [audioUrl]);
+
+  return (
+    <div>
+      {isLoading ? (
+        <div className="h-12 flex items-center justify-center bg-gray-800 rounded">
+          <p className="text-sm text-gray-400">Loading audio...</p>
+        </div>
+      ) : error ? (
+        <div className="h-12 flex items-center justify-center bg-gray-800 rounded">
+          <p className="text-sm text-red-400">{error}</p>
+        </div>
+      ) : (
+        <audio
+          ref={audioRef}
+          controls
+          src={audioUrl || undefined}
+          onPlay={handlePlay}
+          className="w-full"
+        >
+          Your browser does not support the audio element.
+        </audio>
+      )}
+    </div>
+  );
+});
+
+AudioPlayer.displayName = 'AudioPlayer';
+
+const HistoryItem = React.memo(({ item }: { item: HistoryItem }) => {
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 hover:bg-gray-800 transition-colors">
+      <p className="text-sm text-gray-400 mb-2">
+        {formatDate(item.createdAt)}
+      </p>
+      <p className="text-gray-200 mb-3">{item.text}</p>
+      <AudioPlayer item={item} />
+    </div>
+  );
+});
+
+HistoryItem.displayName = 'HistoryItem';
+
 export default function History({ items, onClear }: Props) {
-  if (!Array.isArray(items) || items.length === 0) {
+  if (!items?.length) {
     return (
       <div className="mt-8 text-center text-gray-400">
         <p>No history yet. Generate some speech to get started!</p>
       </div>
     );
   }
-
-  const handleAudioError = (e: React.SyntheticEvent<HTMLAudioElement, Event>, audioUrl: string) => {
-    console.error('Audio playback error for URL:', audioUrl);
-    const audioElement = e.currentTarget;
-    if (audioElement.error) {
-      console.error('Audio element error:', audioElement.error.message);
-    }
-  };
 
   return (
     <div className="mt-8">
@@ -47,34 +125,8 @@ export default function History({ items, onClear }: Props) {
         </button>
       </div>
       <div className="space-y-4">
-        {items.map((item, index) => (
-          <div
-            key={index}
-            className="bg-gray-900 border border-gray-700 rounded-lg p-4 hover:bg-gray-800 transition-colors"
-          >
-            <p className="text-sm text-gray-400 mb-2">
-              {formatDate(item.createdAt)}
-            </p>
-            <p className="text-gray-200 mb-3">{item.text}</p>
-            {item.audioUrl ? (
-              <div>
-                <audio
-                  controls
-                  className="w-full"
-                  onError={(e) => handleAudioError(e, item.audioUrl)}
-                  key={item.audioUrl}
-                >
-                  <source src={item.audioUrl} type="audio/mpeg" />
-                  Your browser does not support the audio element.
-                </audio>
-                <p className="text-xs text-gray-500 mt-1 break-all">
-                  Audio URL: {item.audioUrl}
-                </p>
-              </div>
-            ) : (
-              <p className="text-red-400 text-sm">Audio not available</p>
-            )}
-          </div>
+        {items.map((item) => (
+          <HistoryItem key={item.id} item={item} />
         ))}
       </div>
     </div>
