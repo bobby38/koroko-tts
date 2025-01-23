@@ -1,81 +1,168 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Replicate from 'replicate';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { join } from 'path';
+import { writeFile, unlink } from 'fs/promises';
+import { tmpdir } from 'os';
+
+const execAsync = promisify(exec);
 
 export const runtime = 'nodejs';
+export const maxDuration = 300; // 5 minutes timeout
 
-export async function POST(request: NextRequest) {
-  if (!process.env.REPLICATE_API_TOKEN) {
-    return NextResponse.json(
-      { error: 'REPLICATE_API_TOKEN is not configured' },
-      { status: 500 }
-    );
-  }
+const MODELS = {
+  kokoro: "jaaari/kokoro-82m:dfdf537ba482b029e0a761699e6f55e9162cfd159270bfe0e44857caa5f275a6",
+  xtts: "lucataco/xtts-v2:684bc3855b37866c0c65add2ff39c78f3dea3f4ff103a436465326e0f438d55e"
+} as const;
+
+type XTTS_Speaker = keyof typeof XTTS_SPEAKERS;
+
+const XTTS_SPEAKERS = {
+  male: "https://replicate.delivery/pbxt/Jt79w0xsT64R1JsiJ0LQRL8UcWspg5J4RFrU6YwEKpOT1ukS/male.wav",
+  female: "https://replicate.delivery/pbxt/JqzxMWScZ4O44XwIwWveDoeAE2Ga7gYdnXKb8l18Fv7D3QEx/female.wav"
+} as const;
+
+const XTTS_SPEAKER_KEYS = Object.keys(XTTS_SPEAKERS) as XTTS_Speaker[];
+
+const KOKORO_VOICES = [
+  'af_bella',
+  'af_sarah',
+  'am_adam',
+  'am_michael',
+  'bf_emma',
+  'bf_isabella',
+  'bm_george',
+  'bm_lewis',
+  'af_nicole',
+  'af_sky'
+] as const;
+
+async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
+  const inputPath = join(tmpdir(), `input-${Date.now()}.wav`);
+  const outputPath = join(tmpdir(), `output-${Date.now()}.mp3`);
 
   try {
-    const { text, voice = 'af_bella' } = await request.json();
-    if (!text || typeof text !== 'string') {
+    await writeFile(inputPath, inputBuffer);
+    await execAsync(`ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`);
+    const { readFile } = await import('fs/promises');
+    const outputBuffer = await readFile(outputPath);
+    await Promise.all([
+      unlink(inputPath).catch(() => {}),
+      unlink(outputPath).catch(() => {})
+    ]);
+    return outputBuffer;
+  } catch (error) {
+    try {
+      await Promise.all([
+        unlink(inputPath).catch(() => {}),
+        unlink(outputPath).catch(() => {})
+      ]);
+    } catch {}
+    throw error;
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { text, model = 'xtts', voice = 'af_bella', language = 'en' } = await request.json();
+    
+    // Validate model-specific parameters
+    if (model === 'kokoro') {
+      if (!KOKORO_VOICES.includes(voice)) {
+        return NextResponse.json(
+          { error: `Invalid voice for Kokoro model. Valid voices are: ${KOKORO_VOICES.join(', ')}` },
+          { status: 400 }
+        );
+      }
+    } else if (model === 'xtts') {
+      const validLanguages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh', 'ja'];
+      
+      if (!validLanguages.includes(language)) {
+        return NextResponse.json(
+          { error: `Invalid language for XTTS model. Valid languages are: ${validLanguages.join(', ')}` },
+          { status: 400 }
+        );
+      }
+
+      if (!XTTS_SPEAKER_KEYS.includes(voice as XTTS_Speaker)) {
+        return NextResponse.json(
+          { error: `Invalid speaker for XTTS model. Valid speakers are: male, female` },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (!text) {
       return NextResponse.json(
         { error: 'Text is required' },
         { status: 400 }
       );
     }
 
-    console.log('Processing text:', text);
-    console.log('Using voice:', voice);
+    console.log('Processing TTS request:', { model, voice, language, textLength: text.length });
 
     const replicate = new Replicate({
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    const prediction = await replicate.predictions.create({
-      version: "dfdf537ba482b029e0a761699e6f55e9162cfd159270bfe0e44857caa5f275a6",
-      input: {
-        text: text.trim(),
-        speed: 1.1,
-        voice: voice
-      }
+    let output;
+
+    if (model === 'xtts') {
+      console.log('Using XTTS model with language:', language);
+      const speaker = XTTS_SPEAKERS[voice as keyof typeof XTTS_SPEAKERS] || XTTS_SPEAKERS.female;
+      output = await replicate.run(MODELS.xtts, {
+        input: {
+          text: text.trim(),
+          speaker,
+          language,
+          cleanup_voice: false
+        }
+      });
+    } else {
+      console.log('Using Kokoro model with voice:', voice);
+      output = await replicate.run(MODELS.kokoro, {
+        input: {
+          text: text.trim(),
+          voice,
+          speed: 1.1
+        }
+      });
+    }
+
+    console.log('Model output:', output);
+
+    if (!output) {
+      console.error('No output from model');
+      return NextResponse.json(
+        { error: 'Failed to generate audio' },
+        { status: 500 }
+      );
+    }
+
+    const audioResponse = await fetch(output as string);
+    if (!audioResponse.ok) {
+      console.error('Failed to download audio:', audioResponse.statusText);
+      throw new Error(`Failed to download audio: ${audioResponse.statusText}`);
+    }
+    
+    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    console.log('Audio buffer size:', audioBuffer.length);
+
+    const mp3Buffer = await convertToMp3(audioBuffer);
+    console.log('MP3 buffer size:', mp3Buffer.length);
+
+    return new NextResponse(mp3Buffer, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Content-Disposition': 'attachment; filename="tts-output.mp3"'
+      },
     });
 
-    console.log('Prediction created:', JSON.stringify(prediction, null, 2));
-
-    let result = await replicate.predictions.get(prediction.id);
-    while (result.status === 'processing') {
-      console.log('Processing prediction...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      result = await replicate.predictions.get(prediction.id);
-    }
-
-    console.log('Final result:', JSON.stringify(result, null, 2));
-
-    if (result.error) {
-      throw new Error(result.error);
-    }
-
-    if (!result.output) {
-      throw new Error('No output received from Replicate');
-    }
-
-    let audioUrl: string;
-    if (Array.isArray(result.output) && result.output.length > 0) {
-      audioUrl = result.output[0];
-    } else if (typeof result.output === 'string') {
-      audioUrl = result.output;
-    } else {
-      console.error('Unexpected output format:', result.output);
-      throw new Error('Invalid output format from Replicate');
-    }
-
-    if (!audioUrl.startsWith('http')) {
-      console.error('Invalid audio URL:', audioUrl);
-      throw new Error('Invalid audio URL received from Replicate');
-    }
-
-    console.log('Audio URL:', audioUrl);
-    return NextResponse.json({ output: audioUrl });
   } catch (error) {
-    console.error('API error:', error);
+    console.error('TTS API Error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
+      { error: 'Failed to process TTS request' },
       { status: 500 }
     );
   }
