@@ -11,6 +11,7 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
   const [text, setText] = useState('');
   const [model, setModel] = useState<TTSModel>('kokoro');
   const [voice, setVoice] = useState<KokoroVoice>('af_bella');
+  const [language, setLanguage] = useState('en');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wavFile, setWavFile] = useState<File | null>(null);
@@ -32,7 +33,7 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
       formData.append('voice', voice);
       
       if (model === 'xtts') {
-        formData.append('language', 'en');
+        formData.append('language', language);
         if (wavFile) {
           formData.append('speaker_wav', wavFile);
         }
@@ -66,6 +67,7 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
         audioUrl: '', // We'll set this when loading from IndexedDB
         model,
         voice,
+        language,
         createdAt: new Date().toISOString(),
       };
 
@@ -163,27 +165,57 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
       </div>
 
       {model === 'xtts' && (
-        <div>
-          <label htmlFor="wavFile" className="block text-sm font-medium text-gray-300">
-            Reference Voice (WAV)
-          </label>
-          <input
-            type="file"
-            id="wavFile"
-            accept="audio/wav"
-            onChange={handleWavFileChange}
-            className="mt-1 block w-full text-sm text-gray-300
-              file:mr-4 file:py-2 file:px-4
-              file:rounded-md file:border-0
-              file:text-sm file:font-semibold
-              file:bg-indigo-600 file:text-white
-              hover:file:bg-indigo-700"
-            disabled={isLoading}
-          />
-          <p className="mt-1 text-sm text-gray-400">
-            Optional: Upload a WAV file (max 10MB) to clone a specific voice
-          </p>
-        </div>
+        <>
+          <div>
+            <label htmlFor="language" className="block text-sm font-medium text-gray-300">
+              Language
+            </label>
+            <select
+              id="language"
+              name="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="mt-1 block w-full rounded-md bg-gray-800 border-gray-700 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              disabled={isLoading}
+            >
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="pl">Polish</option>
+              <option value="tr">Turkish</option>
+              <option value="ru">Russian</option>
+              <option value="nl">Dutch</option>
+              <option value="cs">Czech</option>
+              <option value="ar">Arabic</option>
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="wavFile" className="block text-sm font-medium text-gray-300">
+              Reference Voice (WAV)
+            </label>
+            <input
+              type="file"
+              id="wavFile"
+              accept="audio/wav"
+              onChange={handleWavFileChange}
+              className="mt-1 block w-full text-sm text-gray-300
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-md file:border-0
+                file:text-sm file:font-semibold
+                file:bg-indigo-600 file:text-white
+                hover:file:bg-indigo-700"
+              disabled={isLoading}
+            />
+            <p className="mt-1 text-sm text-gray-400">
+              Optional: Upload a WAV file (max 10MB) to clone a specific voice
+            </p>
+          </div>
+        </>
       )}
 
       {model === 'kokoro' && (

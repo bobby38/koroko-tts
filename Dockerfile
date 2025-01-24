@@ -2,7 +2,7 @@ FROM node:18-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat ffmpeg
 WORKDIR /app
 
 # Copy package files
@@ -30,6 +30,7 @@ ENV NEXT_TELEMETRY_DISABLED 1
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
+RUN apk add --no-cache ffmpeg
 
 COPY --from=builder /app/public ./public
 
