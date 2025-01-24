@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
+
+# Base stage with minimal dependencies
 FROM node:18-slim AS base
 
-# Install dependencies only when needed
+# Dependencies stage for npm packages
 FROM base AS deps
 WORKDIR /app
 
@@ -16,63 +18,56 @@ RUN apt-get update && \
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Rebuild the source code only when needed
+# Builder stage for Next.js
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Set environment variables
 ENV NEXT_TELEMETRY_DISABLED 1
-
-# Build the application
 RUN npm run build
 
-# Production image, copy all the files and run next
+# Final production stage
 FROM base AS runner
-LABEL stage=runner
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME="0.0.0.0"
 
-# Install and verify ffmpeg in production stage
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/* && \
-    echo "Verifying ffmpeg installation:" && \
-    which ffmpeg && \
-    ffmpeg -version && \
-    echo "FFmpeg installation verified"
+# Install ffmpeg and verify it works
+RUN set -ex; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ffmpeg; \
+    rm -rf /var/lib/apt/lists/*; \
+    ffmpeg -version; \
+    which ffmpeg
 
-# Create non-root user
-RUN groupadd --system --gid 1001 nodejs && \
-    useradd --system --uid 1001 --gid nodejs nextjs && \
+# Create app user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 --gid nodejs nextjs && \
     chown -R nextjs:nodejs /app
 
-# Copy necessary files
-COPY --from=builder /app/public ./public
+# Copy app files
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Create and set permissions for directories
-RUN mkdir -p .next /tmp && \
-    chown -R nextjs:nodejs .next && \
-    chmod -R 755 .next && \
+# Set up directories and permissions
+RUN mkdir -p /tmp && \
     chown -R nextjs:nodejs /tmp && \
-    chmod -R 777 /tmp
+    chmod 1777 /tmp && \
+    mkdir -p .next && \
+    chown -R nextjs:nodejs .next && \
+    chmod 755 .next
 
 # Switch to non-root user
 USER nextjs
 
-# Verify ffmpeg is accessible to nextjs user
-RUN echo "Verifying ffmpeg as nextjs user:" && \
-    which ffmpeg && \
-    ffmpeg -version
+# Final verification that ffmpeg is accessible to nextjs user
+RUN ffmpeg -version || (echo "ffmpeg not accessible to nextjs user" && exit 1)
 
 EXPOSE 3000
-
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
 
 CMD ["node", "server.js"]
