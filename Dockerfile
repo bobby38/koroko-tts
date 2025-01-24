@@ -1,73 +1,84 @@
 # syntax=docker/dockerfile:1
 
-# Base stage with minimal dependencies
-FROM node:18-slim AS base
-
-# Dependencies stage for npm packages
-FROM base AS deps
+# Production image
+FROM node:18-slim AS runner
 WORKDIR /app
 
-# Install build essentials
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3 \
-    build-essential && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy package files
-COPY package.json package-lock.json ./
-RUN npm ci
-
-# Builder stage for Next.js
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-ENV NEXT_TELEMETRY_DISABLED 1
-RUN npm run build
-
-# Final production stage
-FROM base AS runner
-WORKDIR /app
-
+# Set production environment
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME="0.0.0.0"
 
-# Install ffmpeg and verify it works
-RUN set -ex; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ffmpeg; \
-    rm -rf /var/lib/apt/lists/*; \
-    ffmpeg -version; \
-    which ffmpeg
+# Install ffmpeg first and verify installation
+RUN set -ex && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "Verifying ffmpeg installation..." && \
+    ffmpeg -version && \
+    which ffmpeg && \
+    echo "FFmpeg verified in runner stage"
 
 # Create app user
-RUN addgroup --system --gid 1001 nodejs && \
+RUN set -ex && \
+    addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 --gid nodejs nextjs && \
     chown -R nextjs:nodejs /app
 
-# Copy app files
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN set -ex && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    build-essential && \
+    npm ci && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "Verifying ffmpeg still accessible..." && \
+    ffmpeg -version
+
+# Build the application
+COPY . .
+RUN set -ex && \
+    npm run build && \
+    echo "Verifying ffmpeg after build..." && \
+    ffmpeg -version
+
+# Prepare standalone build
+RUN set -ex && \
+    cp -R .next/standalone/* . && \
+    cp -R .next/static .next/static && \
+    rm -rf .next/standalone && \
+    echo "Verifying ffmpeg after build copy..." && \
+    ffmpeg -version
 
 # Set up directories and permissions
-RUN mkdir -p /tmp && \
+RUN set -ex && \
+    mkdir -p /tmp && \
     chown -R nextjs:nodejs /tmp && \
     chmod 1777 /tmp && \
     mkdir -p .next && \
     chown -R nextjs:nodejs .next && \
-    chmod 755 .next
+    chmod 755 .next && \
+    echo "Directory permissions:" && \
+    ls -la /tmp && \
+    ls -la .next
 
 # Switch to non-root user
 USER nextjs
 
-# Final verification that ffmpeg is accessible to nextjs user
-RUN ffmpeg -version || (echo "ffmpeg not accessible to nextjs user" && exit 1)
+# Final verification as nextjs user
+RUN set -ex && \
+    echo "Final ffmpeg verification as nextjs user:" && \
+    ffmpeg -version && \
+    which ffmpeg && \
+    echo "All verifications passed!"
 
 EXPOSE 3000
+
+# Healthcheck to verify ffmpeg
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ffmpeg -version || exit 1
 
 CMD ["node", "server.js"]
