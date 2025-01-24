@@ -12,6 +12,7 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
   const [model, setModel] = useState<TTSModel>('kokoro');
   const [voice, setVoice] = useState<KokoroVoice>('af_bella');
   const [language, setLanguage] = useState('en');
+  const [xttsVoice, setXttsVoice] = useState('female');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wavFile, setWavFile] = useState<File | null>(null);
@@ -30,13 +31,16 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
       const formData = new FormData();
       formData.append('text', text.trim());
       formData.append('model', model);
-      formData.append('voice', voice);
       
       if (model === 'xtts') {
         formData.append('language', language);
         if (wavFile) {
           formData.append('speaker_wav', wavFile);
+        } else {
+          formData.append('voice', xttsVoice);
         }
+      } else {
+        formData.append('voice', voice);
       }
 
       const response = await fetch('/api/tts', {
@@ -195,8 +199,28 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
             </select>
           </div>
           <div>
+            <label htmlFor="xttsVoice" className="block text-sm font-medium text-gray-300">
+              Default Voice
+            </label>
+            <select
+              id="xttsVoice"
+              name="xttsVoice"
+              value={xttsVoice}
+              onChange={(e) => setXttsVoice(e.target.value)}
+              className="mt-1 block w-full rounded-md bg-gray-800 border-gray-700 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              disabled={isLoading || wavFile !== null}
+            >
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+            </select>
+            <p className="mt-1 text-sm text-gray-400">
+              Select a default voice, or upload a custom voice below
+            </p>
+          </div>
+
+          <div>
             <label htmlFor="wavFile" className="block text-sm font-medium text-gray-300">
-              Reference Voice (WAV)
+              Custom Voice (WAV)
             </label>
             <input
               type="file"

@@ -1,11 +1,16 @@
-FROM node:18-alpine AS base
+FROM node:18-slim AS base
 
 # Install dependencies only when needed
 FROM base AS deps
 WORKDIR /app
 
-# Add build dependencies
-RUN apk add --no-cache libc6-compat
+# Install build essentials
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    python3 \
+    build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package.json package-lock.json ./
@@ -30,28 +35,16 @@ WORKDIR /app
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
-# Install ffmpeg and other dependencies
-RUN apk update && \
-    apk add --no-cache ffmpeg && \
-    rm -rf /var/cache/apk/*
+# Install ffmpeg in production
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    ffmpeg -version
 
 # Create non-root user
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
-
-# Set up ffmpeg with correct permissions
-RUN mkdir -p /usr/local/bin && \
-    cp $(which ffmpeg) /usr/local/bin/ && \
-    chmod 755 /usr/local/bin/ffmpeg && \
-    chown root:root /usr/local/bin/ffmpeg && \
-    ln -sf /usr/local/bin/ffmpeg /usr/bin/ffmpeg
-
-# Set PATH and verify ffmpeg installation
-ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
-RUN ffmpeg -version
-
-# Set up app directory permissions
-RUN chown -R nextjs:nodejs /app
+RUN groupadd --system --gid 1001 nodejs && \
+    useradd --system --uid 1001 --gid nodejs nextjs && \
+    chown -R nextjs:nodejs /app
 
 # Copy necessary files
 COPY --from=builder /app/public ./public
