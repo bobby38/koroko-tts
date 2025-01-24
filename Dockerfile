@@ -18,13 +18,17 @@ RUN set -ex && \
     echo "Verifying ffmpeg installation..." && \
     ffmpeg -version && \
     which ffmpeg && \
-    echo "FFmpeg verified in runner stage"
+    echo "FFmpeg verified in runner stage" && \
+    ln -s $(which ffmpeg) /usr/local/bin/ffmpeg
 
 # Create app user
 RUN set -ex && \
     groupadd -r -g 1001 nodejs && \
     useradd -r -u 1001 -g nodejs nextjs && \
     chown -R nextjs:nodejs /app
+
+# Set PATH for all users
+ENV PATH="/usr/local/bin:${PATH}"
 
 # Install dependencies
 COPY package.json package-lock.json ./

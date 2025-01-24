@@ -79,7 +79,7 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
 
     // Run ffmpeg directly (it's in the PATH)
     const { stdout, stderr } = await execAsync(
-      `ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`
+      `/usr/local/bin/ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`
     );
 
     if (stderr) {
