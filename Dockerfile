@@ -7,7 +7,6 @@ WORKDIR /app
 # Install build essentials
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    ffmpeg \
     python3 \
     build-essential && \
     rm -rf /var/lib/apt/lists/*
@@ -39,28 +38,40 @@ ENV NEXT_TELEMETRY_DISABLED 1
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg && \
     rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /usr/local/bin && \
+    ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && \
+    chmod 755 /usr/local/bin/ffmpeg && \
     ffmpeg -version
 
 # Create non-root user
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs nextjs && \
+    mkdir -p /home/nextjs && \
+    chown -R nextjs:nodejs /home/nextjs && \
     chown -R nextjs:nodejs /app
+
+# Set up environment for nextjs user
+ENV HOME=/home/nextjs
+ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
+WORKDIR /app
 
 # Copy necessary files
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Create and set permissions for .next directory
-RUN mkdir -p .next && \
+# Create and set permissions for directories
+RUN mkdir -p .next /tmp && \
     chown -R nextjs:nodejs .next && \
-    chmod -R 755 .next
+    chmod -R 755 .next && \
+    chown -R nextjs:nodejs /tmp && \
+    chmod -R 777 /tmp
 
 # Switch to non-root user
 USER nextjs
 
 # Verify ffmpeg is accessible to nextjs user
-RUN ffmpeg -version
+RUN which ffmpeg && ffmpeg -version
 
 EXPOSE 3000
 

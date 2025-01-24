@@ -71,54 +71,53 @@ async function getFfmpegPath(): Promise<string> {
 async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
   const inputPath = join(tmpdir(), `input-${Date.now()}.wav`);
   const outputPath = join(tmpdir(), `output-${Date.now()}.mp3`);
-  const ffmpegPaths = ['/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg'];
 
   try {
     // Write input file
     await writeFile(inputPath, inputBuffer);
     console.log('Input file written to:', inputPath);
 
-    // Find working ffmpeg
-    let ffmpegPath = '';
-    let ffmpegError = '';
+    // Debug environment
+    console.log('Current PATH:', process.env.PATH);
+    console.log('Current user:', await execAsync('whoami'));
+    console.log('Current directory:', process.cwd());
+    console.log('Temp directory permissions:', await execAsync(`ls -la ${tmpdir()}`));
 
-    for (const path of ffmpegPaths) {
-      try {
-        await execAsync(`${path} -version`);
-        ffmpegPath = path;
-        console.log('Found working ffmpeg at:', ffmpegPath);
-        break;
-      } catch (error) {
-        ffmpegError = `${error}`;
-        console.warn(`ffmpeg not working at ${path}:`, error);
-      }
-    }
+    // Try to locate ffmpeg
+    const { stdout: ffmpegPath } = await execAsync('which ffmpeg');
+    console.log('ffmpeg path:', ffmpegPath.trim());
 
-    if (!ffmpegPath) {
-      throw new Error(`No working ffmpeg found. Errors: ${ffmpegError}`);
-    }
-
-    // Run conversion with full error capture
-    const { stdout, stderr } = await execAsync(
-      `${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
-      { env: { PATH: process.env.PATH || '/usr/local/bin:/usr/bin' } }
-    ).catch((error) => {
-      console.error('ffmpeg execution error:', error);
-      throw new Error(`ffmpeg execution failed: ${error.message}`);
-    });
-
-    console.log('ffmpeg stdout:', stdout);
-    if (stderr) console.warn('ffmpeg stderr:', stderr);
-
-    // Verify output file exists
+    // Verify ffmpeg works
     try {
-      await execAsync(`ls -l "${outputPath}"`);
+      const { stdout: version } = await execAsync(`${ffmpegPath.trim()} -version`);
+      console.log('ffmpeg version:', version);
     } catch (error) {
-      console.error('Output file check failed:', error);
-      throw new Error('Output file not created');
+      console.error('Error checking ffmpeg version:', error);
+      throw new Error('ffmpeg version check failed');
     }
 
-    // Read output file
+    // Run conversion with absolute path
+    const { stdout, stderr } = await execAsync(
+      `${ffmpegPath.trim()} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
+      {
+        env: {
+          ...process.env,
+          PATH: '/usr/local/bin:/usr/bin:/bin'
+        }
+      }
+    );
+
+    if (stderr) {
+      console.warn('ffmpeg stderr:', stderr);
+    }
+    if (stdout) {
+      console.log('ffmpeg stdout:', stdout);
+    }
+
+    // Verify output file exists and has content
+    const { stdout: lsOutput } = await execAsync(`ls -l "${outputPath}"`);
+    console.log('Output file details:', lsOutput);
+
     const { readFile } = await import('fs/promises');
     const outputBuffer = await readFile(outputPath);
     
