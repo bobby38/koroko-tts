@@ -30,21 +30,28 @@ WORKDIR /app
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
-# Install ffmpeg and verify installation
+# Install ffmpeg and other dependencies
 RUN apk update && \
     apk add --no-cache ffmpeg && \
-    ffmpeg -version && \
-    which ffmpeg && \
-    ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && \
     rm -rf /var/cache/apk/*
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs && \
-    chown -R nextjs:nodejs /app
+    adduser --system --uid 1001 nextjs
 
-# Update PATH to include ffmpeg
+# Set up ffmpeg with correct permissions
+RUN mkdir -p /usr/local/bin && \
+    cp $(which ffmpeg) /usr/local/bin/ && \
+    chmod 755 /usr/local/bin/ffmpeg && \
+    chown root:root /usr/local/bin/ffmpeg && \
+    ln -sf /usr/local/bin/ffmpeg /usr/bin/ffmpeg
+
+# Set PATH and verify ffmpeg installation
 ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
+RUN ffmpeg -version
+
+# Set up app directory permissions
+RUN chown -R nextjs:nodejs /app
 
 # Copy necessary files
 COPY --from=builder /app/public ./public

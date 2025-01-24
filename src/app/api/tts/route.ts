@@ -71,24 +71,54 @@ async function getFfmpegPath(): Promise<string> {
 async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
   const inputPath = join(tmpdir(), `input-${Date.now()}.wav`);
   const outputPath = join(tmpdir(), `output-${Date.now()}.mp3`);
+  const ffmpegPaths = ['/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg'];
 
   try {
+    // Write input file
     await writeFile(inputPath, inputBuffer);
-    
-    // Get ffmpeg path
-    const ffmpegPath = await getFfmpegPath();
-    console.log('Using ffmpeg from:', ffmpegPath);
-    
-    // Run conversion
-    const { stdout, stderr } = await execAsync(`${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`);
-    
-    if (stderr) {
-      console.warn('ffmpeg stderr:', stderr);
-    }
-    if (stdout) {
-      console.log('ffmpeg stdout:', stdout);
+    console.log('Input file written to:', inputPath);
+
+    // Find working ffmpeg
+    let ffmpegPath = '';
+    let ffmpegError = '';
+
+    for (const path of ffmpegPaths) {
+      try {
+        await execAsync(`${path} -version`);
+        ffmpegPath = path;
+        console.log('Found working ffmpeg at:', ffmpegPath);
+        break;
+      } catch (error) {
+        ffmpegError = `${error}`;
+        console.warn(`ffmpeg not working at ${path}:`, error);
+      }
     }
 
+    if (!ffmpegPath) {
+      throw new Error(`No working ffmpeg found. Errors: ${ffmpegError}`);
+    }
+
+    // Run conversion with full error capture
+    const { stdout, stderr } = await execAsync(
+      `${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
+      { env: { PATH: process.env.PATH || '/usr/local/bin:/usr/bin' } }
+    ).catch((error) => {
+      console.error('ffmpeg execution error:', error);
+      throw new Error(`ffmpeg execution failed: ${error.message}`);
+    });
+
+    console.log('ffmpeg stdout:', stdout);
+    if (stderr) console.warn('ffmpeg stderr:', stderr);
+
+    // Verify output file exists
+    try {
+      await execAsync(`ls -l "${outputPath}"`);
+    } catch (error) {
+      console.error('Output file check failed:', error);
+      throw new Error('Output file not created');
+    }
+
+    // Read output file
     const { readFile } = await import('fs/promises');
     const outputBuffer = await readFile(outputPath);
     
@@ -96,7 +126,9 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
       throw new Error('Generated MP3 file is empty');
     }
 
-    // Cleanup
+    console.log('Successfully converted to MP3, size:', outputBuffer.length);
+
+    // Cleanup files
     await Promise.all([
       unlink(inputPath).catch(err => console.error('Error cleaning up input file:', err)),
       unlink(outputPath).catch(err => console.error('Error cleaning up output file:', err))
