@@ -80,19 +80,48 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     // Debug environment
     console.log('Current user:', await execAsync('whoami'));
     console.log('Current directory:', process.cwd());
-    console.log('FFmpeg location:', await execAsync('which ffmpeg').catch(() => 'ffmpeg not found in PATH'));
-    console.log('FFmpeg version:', await execAsync('ffmpeg -version').catch(() => 'Could not get ffmpeg version'));
-    console.log('Directory listing:', await execAsync('ls -la /usr/bin/ffmpeg').catch(() => 'Could not list ffmpeg'));
-    console.log('Temp directory:', await execAsync(`ls -la ${tmpdir()}`).catch(() => 'Could not list temp dir'));
+    console.log('PATH:', process.env.PATH);
 
-    // Run ffmpeg with absolute path
+    // Try to locate ffmpeg
+    let ffmpegPath = '';
+    const possiblePaths = [
+      '/usr/bin/ffmpeg',
+      '/bin/ffmpeg',
+      '/usr/local/bin/ffmpeg',
+      'ffmpeg'
+    ];
+
+    for (const path of possiblePaths) {
+      try {
+        await execAsync(`${path} -version`);
+        ffmpegPath = path;
+        console.log('Found working ffmpeg at:', path);
+        break;
+      } catch (error) {
+        console.log(`ffmpeg not working at ${path}:`, error.message);
+      }
+    }
+
+    if (!ffmpegPath) {
+      console.error('No working ffmpeg found in any location');
+      console.error('Attempting to list ffmpeg locations:');
+      try {
+        const { stdout } = await execAsync('find / -name ffmpeg 2>/dev/null');
+        console.error('Found ffmpeg files:', stdout);
+      } catch (error) {
+        console.error('Error listing ffmpeg files:', error.message);
+      }
+      throw new Error('No working ffmpeg found');
+    }
+
+    // Run ffmpeg with found path
     const { stdout, stderr } = await execAsync(
-      `/usr/bin/ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
+      `${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
       { 
         shell: true,
         env: {
           ...process.env,
-          PATH: '/usr/bin:/bin'
+          PATH: '/usr/local/bin:/usr/bin:/bin'
         }
       }
     );
@@ -125,16 +154,16 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     return outputBuffer;
   } catch (error) {
     console.error('Error in convertToMp3:', error);
-    console.error('PATH:', process.env.PATH);
-    console.error('Current working directory:', process.cwd());
     
     try {
       // Additional error debugging
-      const ffmpegCheck = await execAsync('which ffmpeg').catch(e => e.message);
-      console.error('FFmpeg check:', ffmpegCheck);
-      
-      const dirCheck = await execAsync('ls -la /usr/bin').catch(e => e.message);
-      console.error('Directory check:', dirCheck);
+      console.error('System information:');
+      await execAsync('uname -a').then(({stdout}) => console.error('OS:', stdout));
+      await execAsync('id').then(({stdout}) => console.error('User info:', stdout));
+      await execAsync('ls -la /usr/bin/ffmpeg /bin/ffmpeg /usr/local/bin/ffmpeg').then(
+        ({stdout}) => console.error('FFmpeg files:', stdout),
+        (err) => console.error('Error listing ffmpeg:', err.message)
+      );
     } catch (debugError) {
       console.error('Error during debug checks:', debugError);
     }
