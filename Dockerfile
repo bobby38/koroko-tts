@@ -10,33 +10,37 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME="0.0.0.0"
 
-# Install ffmpeg first and verify installation
+# Install system dependencies and ffmpeg
 RUN set -ex && \
     apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    python3 \
+    build-essential && \
     rm -rf /var/lib/apt/lists/* && \
     echo "Verifying ffmpeg installation..." && \
     ffmpeg -version && \
-    which ffmpeg && \
-    echo "FFmpeg verified in runner stage" && \
-    ln -s $(which ffmpeg) /usr/local/bin/ffmpeg
+    which ffmpeg > /usr/local/bin/ffmpeg-path && \
+    cat /usr/local/bin/ffmpeg-path && \
+    ln -sf $(cat /usr/local/bin/ffmpeg-path) /usr/local/bin/ffmpeg && \
+    chmod +x /usr/local/bin/ffmpeg
+
+# Set PATH and other environment variables
+ENV PATH="/usr/local/bin:${PATH}" \
+    FFMPEG_PATH="/usr/local/bin/ffmpeg"
 
 # Create app user
 RUN set -ex && \
     groupadd -r -g 1001 nodejs && \
     useradd -r -u 1001 -g nodejs nextjs && \
-    chown -R nextjs:nodejs /app
-
-# Set PATH for all users
-ENV PATH="/usr/local/bin:${PATH}"
+    chown -R nextjs:nodejs /app && \
+    # Ensure ffmpeg is accessible to nextjs user
+    chown root:nodejs /usr/local/bin/ffmpeg && \
+    chmod 755 /usr/local/bin/ffmpeg
 
 # Install dependencies
 COPY package.json package-lock.json ./
 RUN set -ex && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3 \
-    build-essential && \
     npm ci && \
     rm -rf /var/lib/apt/lists/* && \
     echo "Verifying ffmpeg still accessible..." && \

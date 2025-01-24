@@ -77,9 +77,10 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     await writeFile(inputPath, inputBuffer);
     console.log('Input file written to:', inputPath);
 
-    // Run ffmpeg directly (it's in the PATH)
+    // Run ffmpeg using the environment variable path
+    const ffmpegPath = process.env.FFMPEG_PATH || '/usr/local/bin/ffmpeg';
     const { stdout, stderr } = await execAsync(
-      `/usr/local/bin/ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`
+      `${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`
     );
 
     if (stderr) {
