@@ -1,5 +1,12 @@
 FROM node:18-slim AS base
 
+# Install ffmpeg in base image
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    which ffmpeg && \
+    ffmpeg -version
+
 # Install dependencies only when needed
 FROM base AS deps
 WORKDIR /app
@@ -34,14 +41,10 @@ WORKDIR /app
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
-# Install ffmpeg in production
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /usr/local/bin && \
-    ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && \
-    chmod 755 /usr/local/bin/ffmpeg && \
-    ffmpeg -version
+# Verify ffmpeg is installed and working
+RUN which ffmpeg && \
+    ffmpeg -version && \
+    echo "FFmpeg installation verified in runner stage"
 
 # Create non-root user
 RUN groupadd --system --gid 1001 nodejs && \
@@ -50,10 +53,8 @@ RUN groupadd --system --gid 1001 nodejs && \
     chown -R nextjs:nodejs /home/nextjs && \
     chown -R nextjs:nodejs /app
 
-# Set up environment for nextjs user
-ENV HOME=/home/nextjs
-ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
-WORKDIR /app
+# Set PATH for all users
+ENV PATH="/usr/bin:/bin:${PATH}"
 
 # Copy necessary files
 COPY --from=builder /app/public ./public
@@ -65,13 +66,17 @@ RUN mkdir -p .next /tmp && \
     chown -R nextjs:nodejs .next && \
     chmod -R 755 .next && \
     chown -R nextjs:nodejs /tmp && \
-    chmod -R 777 /tmp
+    chmod -R 777 /tmp && \
+    ls -la /usr/bin/ffmpeg && \
+    ls -la /tmp
 
 # Switch to non-root user
 USER nextjs
 
 # Verify ffmpeg is accessible to nextjs user
-RUN which ffmpeg && ffmpeg -version
+RUN which ffmpeg && \
+    ffmpeg -version && \
+    echo "FFmpeg accessible to nextjs user"
 
 EXPOSE 3000
 

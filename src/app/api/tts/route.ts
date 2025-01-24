@@ -3,7 +3,7 @@ import Replicate from 'replicate';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile, unlink, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { KokoroVoice, TTSModel } from '@/types';
 
@@ -78,31 +78,21 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     console.log('Input file written to:', inputPath);
 
     // Debug environment
-    console.log('Current PATH:', process.env.PATH);
     console.log('Current user:', await execAsync('whoami'));
     console.log('Current directory:', process.cwd());
-    console.log('Temp directory permissions:', await execAsync(`ls -la ${tmpdir()}`));
+    console.log('FFmpeg location:', await execAsync('which ffmpeg').catch(() => 'ffmpeg not found in PATH'));
+    console.log('FFmpeg version:', await execAsync('ffmpeg -version').catch(() => 'Could not get ffmpeg version'));
+    console.log('Directory listing:', await execAsync('ls -la /usr/bin/ffmpeg').catch(() => 'Could not list ffmpeg'));
+    console.log('Temp directory:', await execAsync(`ls -la ${tmpdir()}`).catch(() => 'Could not list temp dir'));
 
-    // Try to locate ffmpeg
-    const { stdout: ffmpegPath } = await execAsync('which ffmpeg');
-    console.log('ffmpeg path:', ffmpegPath.trim());
-
-    // Verify ffmpeg works
-    try {
-      const { stdout: version } = await execAsync(`${ffmpegPath.trim()} -version`);
-      console.log('ffmpeg version:', version);
-    } catch (error) {
-      console.error('Error checking ffmpeg version:', error);
-      throw new Error('ffmpeg version check failed');
-    }
-
-    // Run conversion with absolute path
+    // Run ffmpeg with absolute path
     const { stdout, stderr } = await execAsync(
-      `${ffmpegPath.trim()} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
-      {
+      `/usr/bin/ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
+      { 
+        shell: true,
         env: {
           ...process.env,
-          PATH: '/usr/local/bin:/usr/bin:/bin'
+          PATH: '/usr/bin:/bin'
         }
       }
     );
@@ -118,7 +108,6 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     const { stdout: lsOutput } = await execAsync(`ls -l "${outputPath}"`);
     console.log('Output file details:', lsOutput);
 
-    const { readFile } = await import('fs/promises');
     const outputBuffer = await readFile(outputPath);
     
     if (outputBuffer.length === 0) {
@@ -136,6 +125,20 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     return outputBuffer;
   } catch (error) {
     console.error('Error in convertToMp3:', error);
+    console.error('PATH:', process.env.PATH);
+    console.error('Current working directory:', process.cwd());
+    
+    try {
+      // Additional error debugging
+      const ffmpegCheck = await execAsync('which ffmpeg').catch(e => e.message);
+      console.error('FFmpeg check:', ffmpegCheck);
+      
+      const dirCheck = await execAsync('ls -la /usr/bin').catch(e => e.message);
+      console.error('Directory check:', dirCheck);
+    } catch (debugError) {
+      console.error('Error during debug checks:', debugError);
+    }
+
     // Cleanup on error
     try {
       await Promise.all([
