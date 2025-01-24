@@ -52,6 +52,7 @@ async function getFfmpegPath(): Promise<string> {
     const commonPaths = [
       '/usr/local/bin/ffmpeg',
       '/usr/bin/ffmpeg',
+      '/opt/homebrew/bin/ffmpeg',
       'ffmpeg'
     ];
     
@@ -77,8 +78,7 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     await writeFile(inputPath, inputBuffer);
     console.log('Input file written to:', inputPath);
 
-    // Run ffmpeg using the environment variable path
-    const ffmpegPath = process.env.FFMPEG_PATH || '/usr/local/bin/ffmpeg';
+    const ffmpegPath = process.env.FFMPEG_PATH || await getFfmpegPath();
     const { stdout, stderr } = await execAsync(
       `${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`
     );

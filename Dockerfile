@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Production image, use full debian instead of slim to ensure all dependencies
 FROM node:18-bullseye AS runner
 WORKDIR /app
@@ -8,7 +6,8 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME="0.0.0.0"
+    HOSTNAME="0.0.0.0" \
+    REPLICATE_API_TOKEN=""
 
 # Install system dependencies and ffmpeg
 RUN set -ex && \
@@ -58,7 +57,7 @@ RUN set -ex && \
 # Copy and install dependencies
 COPY --chown=nextjs:nodejs package*.json ./
 RUN set -ex && \
-    npm ci && \
+    npm ci --include=dev && \
     # Verify ffmpeg is still accessible
     echo "Verifying ffmpeg after npm install:" && \
     /usr/local/bin/ffmpeg -version
@@ -76,7 +75,8 @@ RUN set -ex && \
 # Prepare standalone build
 RUN set -ex && \
     cp -R .next/standalone/* . && \
-    cp -R .next/static .next/static && \
+    mkdir -p public && \
+    cp -R .next/static public/ && \
     rm -rf .next/standalone && \
     # Final verification
     echo "Final ffmpeg verification:" && \

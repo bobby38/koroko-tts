@@ -43,6 +43,30 @@ A modern web application that uses the Kokoro Text-to-Speech API to convert text
 
 - `NEXT_PUBLIC_REPLICATE_API_TOKEN`: Your Replicate API token (required)
 
+## Docker Deployment
+
+1. Build the Docker image:
+   ```bash
+   docker build -t kokoro-tts .
+   ```
+
+2. Run the container:
+   ```bash
+   docker run -p 3000:3000 -e REPLICATE_API_TOKEN=your_token_here kokoro-tts
+   ```
+
+## Coolify Deployment
+
+1. Fork this repository to your GitHub account
+2. In Coolify:
+   - Create a new service
+   - Select your forked repository
+   - Set the following environment variable:
+     ```
+     REPLICATE_API_TOKEN=your_replicate_api_token
+     ```
+   - Deploy the service
+
 ## License
 
 MIT
