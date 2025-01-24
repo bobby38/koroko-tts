@@ -2,7 +2,9 @@ FROM node:18-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
+# Add build dependencies and ffmpeg
 RUN apk add --no-cache libc6-compat ffmpeg
+
 WORKDIR /app
 
 # Copy package files
@@ -28,15 +30,22 @@ WORKDIR /app
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-RUN apk add --no-cache ffmpeg
+# Install ffmpeg in the runner stage
+RUN apk update && \
+    apk add --no-cache ffmpeg && \
+    rm -rf /var/cache/apk/*
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Ensure proper permissions and PATH
+ENV PATH="${PATH}:/usr/bin"
 
 COPY --from=builder /app/public ./public
 
 # Set the correct permission for prerender cache
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
+RUN mkdir .next && \
+    chown nextjs:nodejs .next
 
 # Automatically leverage output traces to reduce image size
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

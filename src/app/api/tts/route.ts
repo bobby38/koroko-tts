@@ -44,21 +44,44 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
 
   try {
     await writeFile(inputPath, inputBuffer);
-    await execAsync(`ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`);
+    
+    // Try to find ffmpeg in different locations
+    const ffmpegCommand = '/usr/bin/ffmpeg';
+    
+    try {
+      await execAsync(`${ffmpegCommand} -version`);
+    } catch (error) {
+      console.error('ffmpeg not found or not executable:', error);
+      throw new Error('ffmpeg not properly installed');
+    }
+
+    const { stdout, stderr } = await execAsync(`${ffmpegCommand} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`);
+    console.log('ffmpeg stdout:', stdout);
+    if (stderr) console.warn('ffmpeg stderr:', stderr);
+
     const { readFile } = await import('fs/promises');
     const outputBuffer = await readFile(outputPath);
+    
+    if (outputBuffer.length === 0) {
+      throw new Error('Generated MP3 file is empty');
+    }
+
     await Promise.all([
-      unlink(inputPath).catch(() => {}),
-      unlink(outputPath).catch(() => {})
+      unlink(inputPath).catch(err => console.error('Error cleaning up input file:', err)),
+      unlink(outputPath).catch(err => console.error('Error cleaning up output file:', err))
     ]);
+
     return outputBuffer;
   } catch (error) {
+    console.error('Error in convertToMp3:', error);
     try {
       await Promise.all([
         unlink(inputPath).catch(() => {}),
         unlink(outputPath).catch(() => {})
       ]);
-    } catch {}
+    } catch (cleanupError) {
+      console.error('Error during cleanup:', cleanupError);
+    }
     throw error;
   }
 }
