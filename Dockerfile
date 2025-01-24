@@ -2,10 +2,10 @@ FROM node:18-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
-# Add build dependencies and ffmpeg
-RUN apk add --no-cache libc6-compat ffmpeg
-
 WORKDIR /app
+
+# Add build dependencies
+RUN apk add --no-cache libc6-compat
 
 # Copy package files
 COPY package.json package-lock.json ./
@@ -30,28 +30,37 @@ WORKDIR /app
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
-# Install ffmpeg in the runner stage
+# Install ffmpeg and verify installation
 RUN apk update && \
     apk add --no-cache ffmpeg && \
+    ffmpeg -version && \
+    which ffmpeg && \
+    ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && \
     rm -rf /var/cache/apk/*
 
+# Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 nextjs && \
+    chown -R nextjs:nodejs /app
 
-# Ensure proper permissions and PATH
-ENV PATH="${PATH}:/usr/bin"
+# Update PATH to include ffmpeg
+ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
 
+# Copy necessary files
 COPY --from=builder /app/public ./public
-
-# Set the correct permission for prerender cache
-RUN mkdir .next && \
-    chown nextjs:nodejs .next
-
-# Automatically leverage output traces to reduce image size
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Create and set permissions for .next directory
+RUN mkdir -p .next && \
+    chown -R nextjs:nodejs .next && \
+    chmod -R 755 .next
+
+# Switch to non-root user
 USER nextjs
+
+# Verify ffmpeg is accessible to nextjs user
+RUN ffmpeg -version
 
 EXPOSE 3000
 

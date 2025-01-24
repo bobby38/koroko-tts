@@ -38,6 +38,36 @@ const KOKORO_VOICES = [
   'af_sky'
 ] as const;
 
+async function getFfmpegPath(): Promise<string> {
+  try {
+    const { stdout } = await execAsync('which ffmpeg');
+    const ffmpegPath = stdout.trim();
+    if (!ffmpegPath) {
+      throw new Error('ffmpeg not found in PATH');
+    }
+    return ffmpegPath;
+  } catch (error) {
+    console.error('Error finding ffmpeg:', error);
+    // Fallback to common locations
+    const commonPaths = [
+      '/usr/local/bin/ffmpeg',
+      '/usr/bin/ffmpeg',
+      'ffmpeg'
+    ];
+    
+    for (const path of commonPaths) {
+      try {
+        await execAsync(`${path} -version`);
+        return path;
+      } catch (e) {
+        console.warn(`ffmpeg not found at ${path}`);
+      }
+    }
+    
+    throw new Error('ffmpeg not found in system');
+  }
+}
+
 async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
   const inputPath = join(tmpdir(), `input-${Date.now()}.wav`);
   const outputPath = join(tmpdir(), `output-${Date.now()}.mp3`);
@@ -45,19 +75,19 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
   try {
     await writeFile(inputPath, inputBuffer);
     
-    // Try to find ffmpeg in different locations
-    const ffmpegCommand = '/usr/bin/ffmpeg';
+    // Get ffmpeg path
+    const ffmpegPath = await getFfmpegPath();
+    console.log('Using ffmpeg from:', ffmpegPath);
     
-    try {
-      await execAsync(`${ffmpegCommand} -version`);
-    } catch (error) {
-      console.error('ffmpeg not found or not executable:', error);
-      throw new Error('ffmpeg not properly installed');
+    // Run conversion
+    const { stdout, stderr } = await execAsync(`${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`);
+    
+    if (stderr) {
+      console.warn('ffmpeg stderr:', stderr);
     }
-
-    const { stdout, stderr } = await execAsync(`${ffmpegCommand} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`);
-    console.log('ffmpeg stdout:', stdout);
-    if (stderr) console.warn('ffmpeg stderr:', stderr);
+    if (stdout) {
+      console.log('ffmpeg stdout:', stdout);
+    }
 
     const { readFile } = await import('fs/promises');
     const outputBuffer = await readFile(outputPath);
@@ -66,6 +96,7 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
       throw new Error('Generated MP3 file is empty');
     }
 
+    // Cleanup
     await Promise.all([
       unlink(inputPath).catch(err => console.error('Error cleaning up input file:', err)),
       unlink(outputPath).catch(err => console.error('Error cleaning up output file:', err))
@@ -74,6 +105,7 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     return outputBuffer;
   } catch (error) {
     console.error('Error in convertToMp3:', error);
+    // Cleanup on error
     try {
       await Promise.all([
         unlink(inputPath).catch(() => {}),
