@@ -71,7 +71,6 @@ export default function TextToSpeechForm({ onSuccess }: Props) {
         audioUrl: '', // We'll set this when loading from IndexedDB
         model,
         voice,
-        language,
         createdAt: new Date().toISOString(),
       };
 

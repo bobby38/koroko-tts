@@ -77,53 +77,9 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
     await writeFile(inputPath, inputBuffer);
     console.log('Input file written to:', inputPath);
 
-    // Debug environment
-    console.log('Current user:', await execAsync('whoami'));
-    console.log('Current directory:', process.cwd());
-    console.log('PATH:', process.env.PATH);
-
-    // Try to locate ffmpeg
-    let ffmpegPath = '';
-    const possiblePaths = [
-      '/usr/bin/ffmpeg',
-      '/bin/ffmpeg',
-      '/usr/local/bin/ffmpeg',
-      'ffmpeg'
-    ];
-
-    for (const path of possiblePaths) {
-      try {
-        await execAsync(`${path} -version`);
-        ffmpegPath = path;
-        console.log('Found working ffmpeg at:', path);
-        break;
-      } catch (error) {
-        console.log(`ffmpeg not working at ${path}:`, error.message);
-      }
-    }
-
-    if (!ffmpegPath) {
-      console.error('No working ffmpeg found in any location');
-      console.error('Attempting to list ffmpeg locations:');
-      try {
-        const { stdout } = await execAsync('find / -name ffmpeg 2>/dev/null');
-        console.error('Found ffmpeg files:', stdout);
-      } catch (error) {
-        console.error('Error listing ffmpeg files:', error.message);
-      }
-      throw new Error('No working ffmpeg found');
-    }
-
-    // Run ffmpeg with found path
+    // Run ffmpeg directly (it's in the PATH)
     const { stdout, stderr } = await execAsync(
-      `${ffmpegPath} -i "${inputPath}" -acodec libmp3lame "${outputPath}"`,
-      { 
-        shell: true,
-        env: {
-          ...process.env,
-          PATH: '/usr/local/bin:/usr/bin:/bin'
-        }
-      }
+      `ffmpeg -i "${inputPath}" -acodec libmp3lame "${outputPath}"`
     );
 
     if (stderr) {
@@ -133,12 +89,8 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
       console.log('ffmpeg stdout:', stdout);
     }
 
-    // Verify output file exists and has content
-    const { stdout: lsOutput } = await execAsync(`ls -l "${outputPath}"`);
-    console.log('Output file details:', lsOutput);
-
+    // Read and verify output
     const outputBuffer = await readFile(outputPath);
-    
     if (outputBuffer.length === 0) {
       throw new Error('Generated MP3 file is empty');
     }
@@ -155,28 +107,12 @@ async function convertToMp3(inputBuffer: Buffer): Promise<Buffer> {
   } catch (error) {
     console.error('Error in convertToMp3:', error);
     
-    try {
-      // Additional error debugging
-      console.error('System information:');
-      await execAsync('uname -a').then(({stdout}) => console.error('OS:', stdout));
-      await execAsync('id').then(({stdout}) => console.error('User info:', stdout));
-      await execAsync('ls -la /usr/bin/ffmpeg /bin/ffmpeg /usr/local/bin/ffmpeg').then(
-        ({stdout}) => console.error('FFmpeg files:', stdout),
-        (err) => console.error('Error listing ffmpeg:', err.message)
-      );
-    } catch (debugError) {
-      console.error('Error during debug checks:', debugError);
-    }
-
     // Cleanup on error
-    try {
-      await Promise.all([
-        unlink(inputPath).catch(() => {}),
-        unlink(outputPath).catch(() => {})
-      ]);
-    } catch (cleanupError) {
-      console.error('Error during cleanup:', cleanupError);
-    }
+    await Promise.all([
+      unlink(inputPath).catch(() => {}),
+      unlink(outputPath).catch(() => {})
+    ]);
+    
     throw error;
   }
 }
