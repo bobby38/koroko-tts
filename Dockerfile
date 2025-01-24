@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# Production image
-FROM node:18-slim AS runner
+# Production image, use full debian instead of slim to ensure all dependencies
+FROM node:18-bullseye AS runner
 WORKDIR /app
 
 # Set production environment
@@ -12,66 +12,75 @@ ENV NODE_ENV=production \
 
 # Install system dependencies and ffmpeg
 RUN set -ex && \
+    # Update package lists
     apt-get update && \
+    # Install required packages
     apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
-    build-essential && \
+    build-essential \
+    ca-certificates && \
+    # Clean up
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
+    # Verify ffmpeg installation
     echo "Verifying ffmpeg installation..." && \
     ffmpeg -version && \
     which ffmpeg > /usr/local/bin/ffmpeg-path && \
-    cat /usr/local/bin/ffmpeg-path && \
+    # Create symlink and set permissions
     ln -sf $(cat /usr/local/bin/ffmpeg-path) /usr/local/bin/ffmpeg && \
-    chmod +x /usr/local/bin/ffmpeg
+    chmod 755 /usr/local/bin/ffmpeg && \
+    # Additional verification
+    echo "FFmpeg location:" && \
+    ls -l /usr/local/bin/ffmpeg && \
+    echo "FFmpeg version:" && \
+    /usr/local/bin/ffmpeg -version
 
 # Set PATH and other environment variables
 ENV PATH="/usr/local/bin:${PATH}" \
     FFMPEG_PATH="/usr/local/bin/ffmpeg"
 
-# Create app user
+# Create app user and set permissions
 RUN set -ex && \
+    # Create user and group
     groupadd -r -g 1001 nodejs && \
     useradd -r -u 1001 -g nodejs nextjs && \
-    chown -R nextjs:nodejs /app && \
-    # Ensure ffmpeg is accessible to nextjs user
+    # Set directory permissions
+    mkdir -p /app /tmp && \
+    chown -R nextjs:nodejs /app /tmp && \
+    chmod 1777 /tmp && \
+    # Set ffmpeg permissions
     chown root:nodejs /usr/local/bin/ffmpeg && \
-    chmod 755 /usr/local/bin/ffmpeg
+    chmod 755 /usr/local/bin/ffmpeg && \
+    # Verify permissions
+    ls -la /usr/local/bin/ffmpeg
 
-# Install dependencies
-COPY package.json package-lock.json ./
+# Copy and install dependencies
+COPY --chown=nextjs:nodejs package*.json ./
 RUN set -ex && \
     npm ci && \
-    rm -rf /var/lib/apt/lists/* && \
-    echo "Verifying ffmpeg still accessible..." && \
-    ffmpeg -version
+    # Verify ffmpeg is still accessible
+    echo "Verifying ffmpeg after npm install:" && \
+    /usr/local/bin/ffmpeg -version
+
+# Copy application code
+COPY --chown=nextjs:nodejs . .
 
 # Build the application
-COPY . .
 RUN set -ex && \
     npm run build && \
-    echo "Verifying ffmpeg after build..." && \
-    ffmpeg -version
+    # Verify ffmpeg after build
+    echo "Verifying ffmpeg after build:" && \
+    /usr/local/bin/ffmpeg -version
 
 # Prepare standalone build
 RUN set -ex && \
     cp -R .next/standalone/* . && \
     cp -R .next/static .next/static && \
     rm -rf .next/standalone && \
-    echo "Verifying ffmpeg after build copy..." && \
-    ffmpeg -version
-
-# Set up directories and permissions
-RUN set -ex && \
-    mkdir -p /tmp && \
-    chown -R nextjs:nodejs /tmp && \
-    chmod 1777 /tmp && \
-    mkdir -p .next && \
-    chown -R nextjs:nodejs .next && \
-    chmod 755 .next && \
-    echo "Directory permissions:" && \
-    ls -la /tmp && \
-    ls -la .next
+    # Final verification
+    echo "Final ffmpeg verification:" && \
+    /usr/local/bin/ffmpeg -version
 
 # Switch to non-root user
 USER nextjs
@@ -79,7 +88,7 @@ USER nextjs
 # Final verification as nextjs user
 RUN set -ex && \
     echo "Final ffmpeg verification as nextjs user:" && \
-    ffmpeg -version && \
+    /usr/local/bin/ffmpeg -version && \
     which ffmpeg && \
     echo "All verifications passed!"
 
@@ -87,6 +96,6 @@ EXPOSE 3000
 
 # Healthcheck to verify ffmpeg
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ffmpeg -version || exit 1
+    CMD /usr/local/bin/ffmpeg -version || exit 1
 
 CMD ["node", "server.js"]
