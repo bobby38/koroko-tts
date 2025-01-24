@@ -22,8 +22,8 @@ RUN set -ex && \
 
 # Create app user
 RUN set -ex && \
-    addgroup -g 1001 nodejs && \
-    adduser -u 1001 -G nodejs nextjs && \
+    groupadd -r -g 1001 nodejs && \
+    useradd -r -u 1001 -g nodejs nextjs && \
     chown -R nextjs:nodejs /app
 
 # Install dependencies
